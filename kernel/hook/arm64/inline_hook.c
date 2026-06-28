@@ -10,6 +10,7 @@
 #include <linux/moduleloader.h>
 #include <linux/numa.h>
 #include <linux/set_memory.h>
+#include <linux/sizes.h>
 #include <linux/string.h>
 #include <linux/vmalloc.h>
 #include <linux/version.h>
@@ -285,28 +286,53 @@ void ksu_inline_hook_arch_set_ret(struct pt_regs *regs, unsigned long ret)
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) || defined(KSU_COMPAT_MODULE_ALLOC_BASE_IN_MODULE_C)
 // https://github.com/torvalds/linux/commit/e46b7103aef39c3f421f0bff7a10ae5a29cd5cee
-static u64 module_alloc_base;
+static u64 ksu_module_alloc_base;
+
+static u64 ksu_inline_get_module_alloc_base(void)
+{
+    if (!ksu_module_alloc_base) {
+        u64 *addr = (u64 *)find_kernel_symbol_exact("module_alloc_base");
+
+        if (addr)
+            ksu_module_alloc_base = READ_ONCE(*addr);
+    }
+
+    if (ksu_module_alloc_base >= MODULES_VADDR && ksu_module_alloc_base < MODULES_END)
+        return ksu_module_alloc_base;
+
+    pr_warn_once("inline_hook: invalid module_alloc_base=0x%llx, fallback to MODULES_VADDR\n",
+                 (unsigned long long)ksu_module_alloc_base);
+    return MODULES_VADDR;
+}
+#else
+static inline u64 ksu_inline_get_module_alloc_base(void)
+{
+    return module_alloc_base;
+}
 #endif
 
 static inline void *ksu_inline_hook_clone_code_alloc(size_t size)
 {
 // https://github.com/torvalds/linux/commit/223b5e57d0d50b0c07b933350dbcde92018d3080
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0) && !defined(KSU_COMPAT_HAVE_EXECMEM_API)
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) || defined(KSU_COMPAT_MODULE_ALLOC_BASE_IN_MODULE_C)
-    if (!module_alloc_base) {
-        u64 *addr = find_kernel_symbol_exact("module_alloc_base");
-        module_alloc_base = *addr;
-    }
-#endif
-
-    u64 module_alloc_end = module_alloc_base + MODULES_VSIZE;
+    u64 base = ksu_inline_get_module_alloc_base();
+    u64 module_alloc_end = base + MODULES_VSIZE;
+    gfp_t gfp_mask = GFP_KERNEL;
+    void *p;
 
     if (IS_ENABLED(CONFIG_KASAN))
         module_alloc_end = MODULES_END;
 
-    return __vmalloc_node_range(size, MODULE_ALIGN, module_alloc_base, module_alloc_end, GFP_KERNEL, PAGE_KERNEL_EXEC,
-                                0, NUMA_NO_NODE, __builtin_return_address(0));
+    if (IS_ENABLED(CONFIG_ARM64_MODULE_PLTS))
+        gfp_mask |= __GFP_NOWARN;
+
+    p = __vmalloc_node_range(size, MODULE_ALIGN, base, module_alloc_end, gfp_mask, PAGE_KERNEL_EXEC, 0, NUMA_NO_NODE,
+                             __builtin_return_address(0));
+    if (p || !IS_ENABLED(CONFIG_ARM64_MODULE_PLTS) || IS_ENABLED(CONFIG_KASAN))
+        return p;
+
+    return __vmalloc_node_range(size, MODULE_ALIGN, base, base + SZ_2G, GFP_KERNEL, PAGE_KERNEL_EXEC, 0, NUMA_NO_NODE,
+                                __builtin_return_address(0));
 #else
     return execmem_alloc_rw(EXECMEM_DEFAULT, size);
 #endif
