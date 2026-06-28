@@ -293,3 +293,9 @@ ifneq ($(shell grep -q "sym_name" $(srctree)/security/selinux/ss/policydb.h; ech
 $(info -- $(REPO_NAME)/compat: sym_name not found)
 ccflags-y += -DKSU_COMPAT_SYM_NAME_NOT_FOUND
 endif
+
+# https://github.com/torvalds/linux/commit/c4ad8f98bef77c7356aa6a9ad9188a6acc6b849d
+ifeq ($(shell grep -q "int do_execve.struct filename .filename" $(srctree)/fs/exec.c; echo $$?),0)
+$(info -- $(REPO_NAME)/compat: found 'struct filename *' for executable name passing)
+ccflags-y += -DKSU_COMPAT_DO_EXECVE_STRUCT_FILENAME
+endif
