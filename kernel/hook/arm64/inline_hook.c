@@ -44,6 +44,7 @@
 #define KSU_AARCH64_RET 0xd65f03c0
 #define KSU_AARCH64_STP_X16_X30_PRE 0xa9bf7bf0
 #define KSU_AARCH64_LDP_X16_X30_POST 0xa8c17bf0
+#define KSU_AARCH64_LDR_X_LITERAL 0x58000000
 #define KSU_AARCH64_NOP 0xd503201f
 #define KSU_AARCH64_BTI_JC 0xd50324df
 
@@ -201,6 +202,20 @@ static int ksu_inline_encode_tbz(u32 insn, unsigned long from, unsigned long to,
         return -ERANGE;
 
     *out = (insn & 0xfff8001f) | (((u32)imm & 0x3fff) << 5);
+    return 0;
+}
+
+static int ksu_inline_encode_ldr_literal(u32 reg, unsigned long from, unsigned long literal, u32 *out)
+{
+    s64 diff = (s64)literal - (s64)from;
+    s64 imm = diff >> 2;
+
+    if (diff & 0x3)
+        return -ERANGE;
+    if (!ksu_inline_simm_fits(imm, 19))
+        return -ERANGE;
+
+    *out = KSU_AARCH64_LDR_X_LITERAL | (((u32)imm & 0x7ffff) << 5) | (reg & 0x1f);
     return 0;
 }
 
@@ -377,6 +392,35 @@ static int ksu_inline_relocate_adr(const struct ksu_inline_reloc_ctx *ctx, u32 i
     return 0;
 }
 
+static int ksu_inline_relocate_adr_far(struct ksu_inline_reloc_ctx *ctx, u32 insn, unsigned long old_pc,
+                                       unsigned long new_pc, u32 *out)
+{
+    u64 imm = ((insn >> 29) & 0x3) | (((insn >> 5) & 0x7ffff) << 2);
+    s64 old_imm = ksu_inline_sign_extend(imm, 21);
+    bool adrp = (insn & 0x80000000) != 0;
+    unsigned long literal = ALIGN(ctx->veneer_cursor, 8);
+    unsigned long dst;
+    u64 value;
+    int ret;
+
+    if (!adrp)
+        return -ERANGE;
+    if (literal + sizeof(value) > ctx->veneer_end)
+        return -ENOSPC;
+
+    dst = (old_pc & PAGE_MASK) + (old_imm << PAGE_SHIFT);
+    dst = ksu_inline_map_clone_page(ctx, dst);
+    value = dst & PAGE_MASK;
+
+    ret = ksu_inline_encode_ldr_literal(insn & 0x1f, new_pc, literal, out);
+    if (ret)
+        return ret;
+
+    memcpy((void *)literal, &value, sizeof(value));
+    ctx->veneer_cursor = literal + sizeof(value);
+    return 0;
+}
+
 static int ksu_inline_relocate_ldr_literal(const struct ksu_inline_reloc_ctx *ctx, u32 insn, unsigned long old_pc,
                                            unsigned long new_pc, u32 *out)
 {
@@ -475,8 +519,14 @@ static int ksu_inline_relocate_insn(const struct ksu_inline_reloc_ctx *ctx, u32 
     if ((insn & 0x7e000000) == 0x36000000)
         return ksu_inline_relocate_tbz(ctx, insn, old_pc, new_pc, out);
 
-    if ((insn & 0x9f000000) == 0x10000000 || (insn & 0x9f000000) == 0x90000000)
-        return ksu_inline_relocate_adr(ctx, insn, old_pc, new_pc, out);
+    if ((insn & 0x9f000000) == 0x10000000 || (insn & 0x9f000000) == 0x90000000) {
+        int ret = ksu_inline_relocate_adr(ctx, insn, old_pc, new_pc, out);
+
+        if (ret != -ERANGE)
+            return ret;
+
+        return ksu_inline_relocate_adr_far((struct ksu_inline_reloc_ctx *)ctx, insn, old_pc, new_pc, out);
+    }
 
     if ((insn & 0x3b000000) == 0x18000000)
         return ksu_inline_relocate_ldr_literal(ctx, insn, old_pc, new_pc, out);
