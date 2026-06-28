@@ -20,6 +20,7 @@
 #include <asm/sections.h>
 
 #include "hook/patch_memory.h"
+#include "compat/kernel_compat.h"
 
 #define KSU_ARM32_PATCH_SIZE 8
 #define KSU_ARM32_ENTRY_SIZE 32

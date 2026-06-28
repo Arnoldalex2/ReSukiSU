@@ -25,6 +25,7 @@
 #include <linux/mm.h>
 #include "hook/patch_memory.h"
 #include "infra/symbol_resolver.h"
+#include "compat/kernel_compat.h"
 
 #ifdef CONFIG_ARM64_BTI_KERNEL
 #define KSU_INLINE_PATCH_SIZE 20

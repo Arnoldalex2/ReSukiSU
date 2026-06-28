@@ -22,6 +22,7 @@
 #include <asm/setup.h>
 
 #include "hook/patch_memory.h"
+#include "compat/kernel_compat.h"
 
 #define KSU_X86_64_PATCH_SIZE 12
 #define KSU_X86_64_ENTRY_SIZE 40
