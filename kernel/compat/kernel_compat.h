@@ -360,6 +360,7 @@ static inline char *sym_name(struct policydb *p, unsigned int sym_num, unsigned 
 #endif
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0) || defined(KSU_COMPAT_HAVE_EXECMEM_API)
+#include <linux/execmem.h>
 
 #ifdef CONFIG_ARCH_HAS_EXECMEM_ROX
 #include <linux/set_memory.h>
