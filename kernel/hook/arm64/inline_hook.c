@@ -24,6 +24,7 @@
 #include <linux/gfp.h>
 #include <linux/mm.h>
 #include "hook/patch_memory.h"
+#include "infra/symbol_resolver.h"
 
 #ifdef CONFIG_ARM64_BTI_KERNEL
 #define KSU_INLINE_PATCH_SIZE 20
@@ -266,10 +267,23 @@ void ksu_inline_hook_arch_set_ret(struct pt_regs *regs, unsigned long ret)
     regs->regs[0] = ret;
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) || defined(KSU_COMPAT_MODULE_ALLOC_BASE_IN_MODULE_C)
+// https://github.com/torvalds/linux/commit/e46b7103aef39c3f421f0bff7a10ae5a29cd5cee
+static u64 module_alloc_base;
+#endif
+
 static inline void *ksu_inline_hook_clone_code_alloc(size_t size)
 {
 // https://github.com/torvalds/linux/commit/223b5e57d0d50b0c07b933350dbcde92018d3080
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0) && !defined(KSU_COMPAT_HAVE_EXECMEM_API)
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0) || defined(KSU_COMPAT_MODULE_ALLOC_BASE_IN_MODULE_C)
+    if (!module_alloc_base) {
+        u64 *addr = find_kernel_symbol_exact("module_alloc_base");
+        module_alloc_base = *addr;
+    }
+#endif
+
     u64 module_alloc_end = module_alloc_base + MODULES_VSIZE;
 
     if (IS_ENABLED(CONFIG_KASAN))
@@ -278,7 +292,7 @@ static inline void *ksu_inline_hook_clone_code_alloc(size_t size)
     return __vmalloc_node_range(size, MODULE_ALIGN, module_alloc_base, module_alloc_end, GFP_KERNEL, PAGE_KERNEL_EXEC,
                                 0, NUMA_NO_NODE, __builtin_return_address(0));
 #else
-    return execmem_alloc(EXECMEM_DEFAULT, size);
+    return execmem_alloc_rw(EXECMEM_DEFAULT, size);
 #endif
 }
 
@@ -585,7 +599,7 @@ int ksu_inline_hook_arch_prepare(struct ksu_inline_hook *hook, u8 *patch, size_t
     return 0;
 
 err_free:
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0) && !defined(KSU_COMPAT_HAVE_EXECMEM_API)
     vfree(code);
 #else
     execmem_free(code);
@@ -599,7 +613,7 @@ err_free:
 void ksu_inline_hook_arch_release(struct ksu_inline_hook *hook)
 {
     if (!hook->active && hook->code) {
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0) && !defined(KSU_COMPAT_HAVE_EXECMEM_API)
         vfree(hook->code);
 #else
         execmem_free(hook->code);

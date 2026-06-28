@@ -114,7 +114,7 @@ static unsigned long ksu_inline_get_module_load_offset(void)
 
 static void *ksu_inline_hook_clone_code_alloc(size_t size)
 {
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0) && !defined(KSU_COMPAT_HAVE_EXECMEM_API)
     void *p;
 
     if (PAGE_ALIGN(size) > MODULES_LEN)
@@ -129,7 +129,7 @@ static void *ksu_inline_hook_clone_code_alloc(size_t size)
 
     return p;
 #else
-    return execmem_alloc(EXECMEM_DEFAULT, size);
+    return execmem_alloc_rw(EXECMEM_DEFAULT, size);
 #endif
 }
 
@@ -196,7 +196,7 @@ int ksu_inline_hook_arch_prepare(struct ksu_inline_hook *hook, u8 *patch, size_t
     return 0;
 
 err_free:
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0) && !defined(KSU_COMPAT_HAVE_EXECMEM_API)
     vfree(code);
 #else
     execmem_free(code);
@@ -210,7 +210,7 @@ err_free:
 void ksu_inline_hook_arch_release(struct ksu_inline_hook *hook)
 {
     if (!hook->active && hook->code) {
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0) && !defined(KSU_COMPAT_HAVE_EXECMEM_API)
         vfree(hook->code);
 #else
         execmem_free(hook->code);

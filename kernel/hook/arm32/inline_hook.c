@@ -90,7 +90,7 @@ void ksu_inline_hook_arch_set_ret(struct pt_regs *regs, unsigned long ret)
 
 static void *ksu_inline_hook_clone_code_alloc(size_t size)
 {
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0) && !defined(KSU_COMPAT_HAVE_EXECMEM_API)
     gfp_t gfp_mask = GFP_KERNEL;
     void *p;
 
@@ -105,7 +105,7 @@ static void *ksu_inline_hook_clone_code_alloc(size_t size)
     return __vmalloc_node_range(size, 1, VMALLOC_START, VMALLOC_END, GFP_KERNEL, PAGE_KERNEL_EXEC, 0, NUMA_NO_NODE,
                                 __builtin_return_address(0));
 #else
-    return execmem_alloc(EXECMEM_DEFAULT, size);
+    return execmem_alloc_rw(EXECMEM_DEFAULT, size);
 #endif
 }
 
@@ -184,7 +184,7 @@ int ksu_inline_hook_arch_prepare(struct ksu_inline_hook *hook, u8 *patch, size_t
     return 0;
 
 err_free:
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0) && !defined(KSU_COMPAT_HAVE_EXECMEM_API)
     vfree(code);
 #else
     execmem_free(code);
@@ -199,7 +199,7 @@ err_free:
 void ksu_inline_hook_arch_release(struct ksu_inline_hook *hook)
 {
     if (!hook->active && hook->code) {
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0) && !defined(KSU_COMPAT_HAVE_EXECMEM_API)
         vfree(hook->code);
 #else
         execmem_free(hook->code);

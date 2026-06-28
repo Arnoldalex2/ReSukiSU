@@ -299,3 +299,15 @@ ifeq ($(shell grep -q "int do_execve.struct filename .filename" $(srctree)/fs/ex
 $(info -- $(REPO_NAME)/compat: found 'struct filename *' for executable name passing)
 ccflags-y += -DKSU_COMPAT_DO_EXECVE_STRUCT_FILENAME
 endif
+
+# https://github.com/torvalds/linux/commit/223b5e57d0d50b0c07b933350dbcde92018d3080
+ifneq ($(wildcard $(srctree)/include/linux/execmem.h),)
+$(info -- $(REPO_NAME)/compat: found execmem api)
+ccflags-y += -DKSU_COMPAT_HAVE_EXECMEM_API
+endif
+
+# https://github.com/torvalds/linux/commit/e46b7103aef39c3f421f0bff7a10ae5a29cd5cee
+ifneq ($(shell grep -q "module_alloc_base" $(srctree)/arch/arm64/include/asm/module.h; echo $$?),0)
+$(info -- $(REPO_NAME)/compat: found module_alloc_base removed)
+ccflags-y += -DKSU_COMPAT_MODULE_ALLOC_BASE_IN_MODULE_C
+endif
