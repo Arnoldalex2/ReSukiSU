@@ -324,6 +324,11 @@ $(info -- $(REPO_NAME)/compat: found vmflags in __vmalloc_node_range)
 ccflags-y += -DKSU_COMPAT_HAVE_VMFLAGS_IN_VMALLOC_NODE_RANGE
 endif
 
+ifeq ($(shell grep -q "kasan_alloc_module_shadow" $(srctree)/include/linux/kasan.h; echo $$?),0)
+$(info -- $(REPO_NAME)/compat: found kasan_alloc_module_shadow)
+ccflags-y += -DKSU_COMPAT_HAVE_KASAN_ALLOC_MODULE_SHADOW
+endif
+
 # https://github.com/torvalds/linux/commit/51f39a1f0cea1cacf8c787f652f26dfee9611874
 ifeq ($(shell grep -q "do_execveat_common" $(srctree)/fs/exec.c; echo $$?),0)
 $(info -- $(REPO_NAME)/compat: found do_execveat_common)

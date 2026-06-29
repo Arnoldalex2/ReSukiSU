@@ -6,6 +6,7 @@
 
 #include <linux/errno.h>
 #include <linux/kallsyms.h>
+#include <linux/kasan.h>
 #include <linux/kernel.h>
 #include <linux/moduleloader.h>
 #include <linux/numa.h>
@@ -325,6 +326,17 @@ static inline u64 ksu_inline_get_module_alloc_base(void)
 #define MODULE_ALIGN PAGE_SIZE
 #endif
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0) && !defined(KSU_COMPAT_HAVE_EXECMEM_API)
+static inline int ksu_inline_kasan_module_alloc(void *p, size_t size, gfp_t flags)
+{
+#ifdef KSU_COMPAT_HAVE_KASAN_ALLOC_MODULE_SHADOW
+    return kasan_alloc_module_shadow(p, size, flags);
+#else
+    return kasan_module_alloc(p, size);
+#endif
+}
+#endif
+
 static inline void *ksu_inline_hook_clone_code_alloc(size_t size)
 {
 // https://github.com/torvalds/linux/commit/223b5e57d0d50b0c07b933350dbcde92018d3080
@@ -334,11 +346,11 @@ static inline void *ksu_inline_hook_clone_code_alloc(size_t size)
     gfp_t gfp_mask = GFP_KERNEL;
     void *p;
 
-    if (IS_ENABLED(CONFIG_KASAN))
-        module_alloc_end = MODULES_END;
-
     if (IS_ENABLED(CONFIG_ARM64_MODULE_PLTS))
         gfp_mask |= __GFP_NOWARN;
+
+    if (IS_ENABLED(CONFIG_KASAN_GENERIC) || IS_ENABLED(CONFIG_KASAN_SW_TAGS))
+        module_alloc_end = MODULES_END;
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0) || defined(KSU_COMPAT_HAVE_VMFLAGS_IN_VMALLOC_NODE_RANGE)
     p = __vmalloc_node_range(size, MODULE_ALIGN, base, module_alloc_end, gfp_mask, PAGE_KERNEL_EXEC, 0, NUMA_NO_NODE,
@@ -347,16 +359,25 @@ static inline void *ksu_inline_hook_clone_code_alloc(size_t size)
     p = __vmalloc_node_range(size, MODULE_ALIGN, base, module_alloc_end, gfp_mask, PAGE_KERNEL_EXEC, NUMA_NO_NODE,
                              __builtin_return_address(0));
 #endif
-    if (p || !IS_ENABLED(CONFIG_ARM64_MODULE_PLTS) || IS_ENABLED(CONFIG_KASAN))
-        return p;
 
+    if (!p && IS_ENABLED(CONFIG_ARM64_MODULE_PLTS) &&
+        (IS_ENABLED(CONFIG_KASAN_VMALLOC) ||
+         (!IS_ENABLED(CONFIG_KASAN_GENERIC) && !IS_ENABLED(CONFIG_KASAN_SW_TAGS)))) {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0) || defined(KSU_COMPAT_HAVE_VMFLAGS_IN_VMALLOC_NODE_RANGE)
-    return __vmalloc_node_range(size, MODULE_ALIGN, base, base + SZ_2G, GFP_KERNEL, PAGE_KERNEL_EXEC, 0, NUMA_NO_NODE,
-                                __builtin_return_address(0));
+        p = __vmalloc_node_range(size, MODULE_ALIGN, base, base + SZ_2G, GFP_KERNEL, PAGE_KERNEL_EXEC, 0, NUMA_NO_NODE,
+                                 __builtin_return_address(0));
 #else
-    return __vmalloc_node_range(size, MODULE_ALIGN, base, base + SZ_2G, GFP_KERNEL, PAGE_KERNEL_EXEC, NUMA_NO_NODE,
-                                __builtin_return_address(0));
+        p = __vmalloc_node_range(size, MODULE_ALIGN, base, base + SZ_2G, GFP_KERNEL, PAGE_KERNEL_EXEC, NUMA_NO_NODE,
+                                 __builtin_return_address(0));
 #endif
+    }
+
+    if (p && ksu_inline_kasan_module_alloc(p, size, gfp_mask) < 0) {
+        vfree(p);
+        return NULL;
+    }
+
+    return kasan_reset_tag(p);
 #else
     return execmem_alloc_rw(EXECMEM_DEFAULT, size);
 #endif
