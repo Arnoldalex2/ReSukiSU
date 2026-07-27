@@ -711,7 +711,7 @@ static bool add_type(struct policydb *db, const char *type_name, bool attr)
     }
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0) ||                                                                   \
-    (defined(KSU_COMPAT_HAS_MODERN_POLICYDB) && !defined(KSU_COMPAT_IS_HISI_LEGACY))
+    (defined(KSU_COMPAT_HAS_MODERN_POLICYDB) && !defined(KSU_COMPAT_TYPE_ATTR_MAP_ARRAY_NOT_FOUND))
     struct ebitmap *new_type_attr_map_array =
         ksu_kvrealloc(db->type_attr_map_array, value * sizeof(struct ebitmap), (value - 1) * sizeof(struct ebitmap));
 
@@ -752,7 +752,8 @@ static bool add_type(struct policydb *db, const char *type_name, bool attr)
 
     return true;
 
-#elif defined(KSU_COMPAT_IS_HISI_LEGACY)
+    // safe? because only huawei do this fucking things
+#elif defined(KSU_COMPAT_TYPE_ATTR_MAP_ARRAY_NOT_FOUND)
     /*
    * Huawei use type_attr_map and type_val_to_struct.
    * And use ebitmap not flex_array.
