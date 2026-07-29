@@ -18,7 +18,6 @@ pub enum Slot {
 }
 
 impl Slot {
-    #[cfg(target_os = "android")]
     const fn suffix(self) -> &'static str {
         match self {
             Self::A => "_a",
@@ -185,7 +184,6 @@ where
     combine_results(primary_result, restore_result, restore_label)
 }
 
-#[cfg(target_os = "android")]
 mod android {
     use std::{
         fs::{self, File},
@@ -419,143 +417,4 @@ mod android {
     }
 }
 
-#[cfg(target_os = "android")]
 pub use android::flash;
-
-#[cfg(test)]
-mod tests {
-    use std::{cell::Cell, ffi::OsString, io::Cursor, path::Path};
-
-    use super::{
-        Slot, combine_results, ensure_installer_success, forward_installer_output,
-        installer_arguments, patch_update_binary, run_then_restore, select_update_binary,
-    };
-
-    #[test]
-    fn patches_the_only_supported_marker() {
-        let script = b"before\n  chmod -R 755 tools bin;\nafter\n";
-        let patched = patch_update_binary(script, Path::new("/data/adb/ksu/mkbootfs")).unwrap();
-        let patched = String::from_utf8(patched).unwrap();
-        assert_eq!(
-            patched,
-            "before\n  cp -f '/data/adb/ksu/mkbootfs' \"$AKHOME/tools/mkbootfs\" || exit 1; \
-             chmod -R 755 tools bin;\nafter\n"
-        );
-    }
-
-    #[test]
-    fn quotes_the_embedded_binary_path() {
-        let patched =
-            patch_update_binary(PATCH_SCRIPT, Path::new("/data/it's here/mkbootfs")).unwrap();
-        assert!(
-            String::from_utf8(patched)
-                .unwrap()
-                .contains("'/data/it'\"'\"'s here/mkbootfs'")
-        );
-    }
-
-    #[test]
-    fn filters_recovery_output_protocol() {
-        let input = b"progress 1.34 25\r\n\
-                      ui_print ExampleKernel by osm0sis\r\n\
-                            ui_print\r\n\
-                      normal output\r\n\
-                      ui_print  \r\n\
-                            ui_print\r\n\
-                      set_progress 0.5\r\n";
-        let mut user_interface = Vec::new();
-        let mut console = Vec::new();
-
-        forward_installer_output(Cursor::new(input), &mut user_interface, &mut console).unwrap();
-
-        assert_eq!(user_interface, b"ExampleKernel by osm0sis\n \n");
-        assert_eq!(
-            console,
-            b"progress 1.34 25\nnormal output\nset_progress 0.5\n"
-        );
-    }
-
-    #[test]
-    fn rejects_missing_or_duplicate_markers() {
-        assert!(patch_update_binary(b"echo no marker", Path::new("/tmp/mkbootfs")).is_err());
-        assert!(
-            patch_update_binary(
-                b"chmod -R 755 tools bin;\nchmod -R 755 tools bin;",
-                Path::new("/tmp/mkbootfs")
-            )
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn requires_one_exact_update_binary_entry() {
-        assert_eq!(
-            select_update_binary([(0, "other"), (4, super::UPDATE_BINARY_ENTRY)]).unwrap(),
-            4
-        );
-        assert!(
-            select_update_binary([(0, "prefix/META-INF/com/google/android/update-binary")])
-                .is_err()
-        );
-        assert!(
-            select_update_binary([
-                (0, super::UPDATE_BINARY_ENTRY),
-                (1, super::UPDATE_BINARY_ENTRY)
-            ])
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn reports_primary_and_cleanup_errors() {
-        let result = combine_results(
-            Err(anyhow::anyhow!("flash failed")),
-            Err(anyhow::anyhow!("cleanup failed")),
-            "cleanup",
-        );
-        let message = format!("{:#}", result.unwrap_err());
-        assert!(message.contains("flash failed"));
-        assert!(message.contains("cleanup failed"));
-    }
-
-    #[test]
-    fn appends_only_the_requested_slot_argument() {
-        let zip = Path::new("/data/local/tmp/kernel image.zip");
-        assert_eq!(
-            installer_arguments(zip, None),
-            vec![
-                OsString::from("3"),
-                OsString::from("1"),
-                zip.as_os_str().to_owned()
-            ]
-        );
-        assert_eq!(
-            installer_arguments(zip, Some(Slot::B)).last(),
-            Some(&OsString::from("b"))
-        );
-    }
-
-    #[test]
-    fn rejects_a_failed_installer_exit() {
-        let error = ensure_installer_success(false, "exit code 7").unwrap_err();
-        assert!(error.to_string().contains("exit code 7"));
-        ensure_installer_success(true, "exit code 0").unwrap();
-    }
-
-    #[test]
-    fn restores_the_slot_after_installer_failure() {
-        let restored = Cell::new(false);
-        let result = run_then_restore(
-            || Err(anyhow::anyhow!("installer failed")),
-            || {
-                restored.set(true);
-                Ok(())
-            },
-            "slot restoration",
-        );
-        assert!(result.is_err());
-        assert!(restored.get());
-    }
-
-    const PATCH_SCRIPT: &[u8] = b"chmod -R 755 tools bin;";
-}

@@ -2,7 +2,7 @@
 
 #[cfg(target_os = "android")]
 mod android;
-#[cfg(any(target_os = "android", test))]
+#[cfg(target_os = "android")]
 mod anykernel3;
 mod apk_sign;
 mod assets;

@@ -86,11 +86,36 @@ fn build_mkbootfs(out_directory: &Path) {
     println!("cargo:rerun-if-env-changed=ANDROID_NDK_HOME");
     println!("cargo:rerun-if-env-changed=ANDROID_NDK_ROOT");
 
-    let compiler = cc::Build::new()
+    let mut build = cc::Build::new();
+    build
         .cpp(true)
         .target(&target)
         .cargo_metadata(false)
-        .get_compiler();
+        .flag(format!("--target={clang_target}"))
+        .flags([
+            "-std=c++20",
+            "-Oz",
+            "-D_FILE_OFFSET_BITS=64",
+            "-D_FORTIFY_SOURCE=2",
+            "-fPIE",
+            "-fstack-protector-strong",
+            "-ffunction-sections",
+            "-fdata-sections",
+            "-fvisibility=hidden",
+            "-fno-exceptions",
+            "-fno-rtti",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-pie",
+            "-static-libstdc++",
+            "-Wl,--gc-sections",
+            "-Wl,--build-id=none",
+            "-Wl,--exclude-libs,ALL",
+            "-Wl,-z,relro,-z,now",
+            "-Wl,--strip-all",
+        ]);
+    let compiler = build.get_compiler();
     if !compiler.is_like_clang() {
         panic!(
             "mkbootfs requires the Android NDK clang++ compiler, got {:?}",
@@ -105,33 +130,10 @@ fn build_mkbootfs(out_directory: &Path) {
         )
     });
     let temporary_output = out_directory.join("mkbootfs");
+    // cc::Build::compile() only emits a static archive. Run its fully configured tool once to
+    // produce the standalone executable that RustEmbed packages as an asset.
     let mut command = compiler.to_command();
-    command
-        .arg(format!("--target={clang_target}"))
-        .arg("-std=c++20")
-        .arg("-Oz")
-        .arg("-D_FILE_OFFSET_BITS=64")
-        .arg("-D_FORTIFY_SOURCE=2")
-        .arg("-fPIE")
-        .arg("-fstack-protector-strong")
-        .arg("-ffunction-sections")
-        .arg("-fdata-sections")
-        .arg("-fvisibility=hidden")
-        .arg("-fno-exceptions")
-        .arg("-fno-rtti")
-        .arg("-Wall")
-        .arg("-Wextra")
-        .arg("-Werror")
-        .arg(&source)
-        .arg("-pie")
-        .arg("-static-libstdc++")
-        .arg("-Wl,--gc-sections")
-        .arg("-Wl,--build-id=none")
-        .arg("-Wl,--exclude-libs,ALL")
-        .arg("-Wl,-z,relro,-z,now")
-        .arg("-Wl,--strip-all")
-        .arg("-o")
-        .arg(&temporary_output);
+    command.arg(&source).arg("-o").arg(&temporary_output);
 
     let status = command
         .status()

@@ -131,7 +131,9 @@ class HorizonKernelWorker(
                 return
             }
 
-            install()
+            runCatching { install() }.onFailure { error ->
+                Log.w(TAG, "Failed to refresh ksud after a successful kernel flash", error)
+            }
             state.updateStep(context.getString(R.string.horizon_flash_complete_status))
             state.completeFlashing()
 
