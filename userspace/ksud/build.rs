@@ -58,6 +58,7 @@ fn configure_bindgen() {
 
 fn build_mkbootfs(out_directory: &Path) {
     const API_LEVEL: u32 = 26;
+    const LIBRARY_NAME: &str = "mkbootfs";
 
     let target = env::var("TARGET").expect("TARGET not set");
     let manifest_directory =
@@ -91,12 +92,14 @@ fn build_mkbootfs(out_directory: &Path) {
         .cpp(true)
         .target(&target)
         .cargo_metadata(false)
+        .out_dir(out_directory)
+        .file(&source)
+        .std("c++20")
+        .opt_level_str("z")
+        .define("_FILE_OFFSET_BITS", "64")
+        .define("_FORTIFY_SOURCE", "2")
         .flag(format!("--target={clang_target}"))
         .flags([
-            "-std=c++20",
-            "-Oz",
-            "-D_FILE_OFFSET_BITS=64",
-            "-D_FORTIFY_SOURCE=2",
             "-fPIE",
             "-fstack-protector-strong",
             "-ffunction-sections",
@@ -104,17 +107,10 @@ fn build_mkbootfs(out_directory: &Path) {
             "-fvisibility=hidden",
             "-fno-exceptions",
             "-fno-rtti",
-            "-Wall",
-            "-Wextra",
-            "-Werror",
-            "-pie",
-            "-static-libstdc++",
-            "-Wl,--gc-sections",
-            "-Wl,--build-id=none",
-            "-Wl,--exclude-libs,ALL",
-            "-Wl,-z,relro,-z,now",
-            "-Wl,--strip-all",
-        ]);
+        ])
+        .warnings(true)
+        .extra_warnings(true)
+        .warnings_into_errors(true);
     let compiler = build.get_compiler();
     if !compiler.is_like_clang() {
         panic!(
@@ -129,11 +125,38 @@ fn build_mkbootfs(out_directory: &Path) {
             asset_directory.display()
         )
     });
+
+    build.compile(LIBRARY_NAME);
+    let archive = out_directory.join(format!("lib{LIBRARY_NAME}.a"));
+    if !archive.is_file() {
+        panic!(
+            "cc did not produce the expected mkbootfs archive {}",
+            archive.display()
+        );
+    }
+
     let temporary_output = out_directory.join("mkbootfs");
-    // cc::Build::compile() only emits a static archive. Run its fully configured tool once to
-    // produce the standalone executable that RustEmbed packages as an asset.
-    let mut command = compiler.to_command();
-    command.arg(&source).arg("-o").arg(&temporary_output);
+    let mut linker = cc::Build::new();
+    linker
+        .cpp(true)
+        .target(&target)
+        .cargo_metadata(false)
+        .no_default_flags(true)
+        .flag(format!("--target={clang_target}"));
+    let mut command = linker.get_compiler().to_command();
+    command
+        .arg(&archive)
+        .args([
+            "-pie",
+            "-static-libstdc++",
+            "-Wl,--gc-sections",
+            "-Wl,--build-id=none",
+            "-Wl,--exclude-libs,ALL",
+            "-Wl,-z,relro,-z,now",
+            "-Wl,--strip-all",
+        ])
+        .arg("-o")
+        .arg(&temporary_output);
 
     let status = command
         .status()
