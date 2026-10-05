@@ -310,7 +310,7 @@ jobs:
           cp -f "$X86_64_KSUD" target/x86_64-linux-android/release/ksud
           cp -f "$RISCV64_KSUD" target/riscv64-linux-android/release/ksud
 
-      - name: Prepare signing inputs
+            - name: Prepare signing inputs
         env:
           PR_KEYSTORE: ${{ needs.prepare.outputs.keystore }}
           PR_KEYSTORE_PASSWORD: ${{ needs.prepare.outputs.keystore_password }}
@@ -326,15 +326,35 @@ jobs:
             echo "SIGN_KEY_ALIAS=pr-key" >> $GITHUB_ENV
             echo "SIGN_KEYSTORE_PASSWORD=$PR_KEYSTORE_PASSWORD" >> $GITHUB_ENV
             echo "SIGN_KEY_PASSWORD=$PR_KEY_PASSWORD" >> $GITHUB_ENV
-          else
-            test -n "$PROD_KEYSTORE"
+
+          elif [ -n "$PROD_KEYSTORE" ]; then
             echo "$PROD_KEYSTORE" | base64 -d > key.jks
             echo "SIGN_KEYSTORE_FILE=key.jks" >> $GITHUB_ENV
             echo "SIGN_KEY_ALIAS=$PROD_KEY_ALIAS" >> $GITHUB_ENV
             echo "SIGN_KEYSTORE_PASSWORD=$PROD_KEYSTORE_PASSWORD" >> $GITHUB_ENV
             echo "SIGN_KEY_PASSWORD=$PROD_KEY_PASSWORD" >> $GITHUB_ENV
-          fi
 
+          else
+            KEYSTORE_PASSWORD="fork-build-password"
+            KEY_PASSWORD="fork-build-password"
+
+            keytool -genkeypair \
+              -alias fork-key \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -storepass "$KEYSTORE_PASSWORD" \
+              -keypass "$KEY_PASSWORD" \
+              -dname "CN=ReSukiSU Fork Build" \
+              -storetype JKS \
+              -keystore fork-key.jks
+
+            echo "SIGN_KEYSTORE_FILE=fork-key.jks" >> $GITHUB_ENV
+            echo "SIGN_KEY_ALIAS=fork-key" >> $GITHUB_ENV
+            echo "SIGN_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> $GITHUB_ENV
+            echo "SIGN_KEY_PASSWORD=$KEY_PASSWORD" >> $GITHUB_ENV
+          fi
+          
       - name: Repack and resign
         run: |
           python3 repack_apk_multi.py repack \
