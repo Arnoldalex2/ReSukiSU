@@ -353,7 +353,7 @@ jobs:
             echo "SIGN_KEY_ALIAS=fork-key" >> $GITHUB_ENV
             echo "SIGN_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> $GITHUB_ENV
             echo "SIGN_KEY_PASSWORD=$KEY_PASSWORD" >> $GITHUB_ENV
-          fi
+          
           
       - name: Repack and resign
         run: |
